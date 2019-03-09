@@ -1,0 +1,210 @@
+---
+title: "Capstone Project"
+author: "Amal"
+date: "March 05, 2019"
+output: html_document
+---
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = FALSE, message = FALSE)
+```
+
+## 1. Summary
+
+Create RDAta files which can be used by Shiny App
+
+## 2. Data Loading and Pre-Processing
+
+
+#### 2.1. Loading necessary R Libraries
+
+
+```{r}
+library(stringi) # stats files
+library(NLP); 
+library(openNLP)
+library(tm) # Text mining
+library(rJava)
+library(RWeka) # tokenizer - create unigrams, bigrams, trigrams
+library(RWekajars)
+library(SnowballC) # Stemming
+library(RColorBrewer) # Color palettes
+library(qdap)
+library(ggplot2) #visualization
+```
+
+#### 2.2. Downloading and extracing Source Data
+```{r, cache = T}
+sourceDataUrl <-"http://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip"
+sourceFileName <- "Coursera-SwiftKey.zip"
+if (!file.exists(sourceFileName)) {
+  download.file(sourceDataUrl, destfile=sourceFileName)
+  #Unzip the file
+  unzip(sourceFileName)
+}
+
+```
+
+The source data sets consist of data in 4 different languages i.e German, English (US), Finnish and Russian. Each of the language data sets are further divided into 3 different type of data sets i.e.  News, Blogs and Twitter. As a part of this project, we will only look at the English (US) data set.
+
+ 
+
+```{r, cache = T}
+fileBlogs <- file("./Coursera-SwiftKey/final/en_US/en_US.blogs.txt", "rb")
+blogs <- readLines(fileBlogs, encoding="UTF-8", skipNul = TRUE)
+close(fileBlogs)
+
+fileNews <- file("./Coursera-SwiftKey/final/en_US/en_US.news.txt", "rb")
+news <- readLines(fileNews, encoding="UTF-8", skipNul = TRUE)
+close(fileNews)
+
+fileTwitter <- file("./Coursera-SwiftKey/final/en_US/en_US.twitter.txt", "rb")
+twitter <- readLines(fileTwitter, encoding="UTF-8", skipNul = TRUE)
+close(fileTwitter)
+```
+
+
+#### 2.3. Data Sampling
+
+Since the data set is large, We will randomly choose 5000 of each data set
+
+```{r, cache = T}
+set.seed(011)
+blogsSample <- sample(blogs, size = 5000, replace = TRUE)
+newsSample <- sample(news, size = 5000, replace = TRUE)
+twitterSample <- sample(twitter, size = 5000, replace = TRUE)
+twitterSample <- sapply(twitterSample,
+                        function(row) iconv(row, "latin1", "ASCII", sub=""))
+
+dataSample  <- c(blogsSample,newsSample,twitterSample)
+writeLines(dataSample, "./sampleData.txt")
+```
+
+#### 2.4. Data Cleansing
+
+Sample Data Processing for various n-grams.  
+
+```{r, cache = T}
+dataCon <- file("./sampleData.txt")
+dataCorpus <- readLines(dataCon)
+dataCorpus <- Corpus(VectorSource(dataCorpus)) # TM reading the text as lists
+dataCorpus <- tm_map(dataCorpus, content_transformer(function(x) iconv(x, to="UTF-8", sub="byte")))
+dataCorpus <- tm_map(dataCorpus, content_transformer(tolower))
+dataCorpus <- tm_map(dataCorpus, content_transformer(removePunctuation), preserve_intra_word_dashes=TRUE) 
+profanityWords = readLines('profanity-words.txt')
+#dataCorpus <- tm_map(dataCorpus, removeWords, profanityWords)
+dataCorpus <- tm_map(dataCorpus, content_transformer(removeNumbers))
+## removing URLs 
+removeURL <- function(x) gsub("http[[:alnum:]]*", "", x)
+dataCorpus <- tm_map(dataCorpus, content_transformer(removeURL))
+dataCorpus <- tm_map(dataCorpus, removeWords, stopwords("english")) # removing stop words in English i.e. a, as, at, so, etc.
+dataCorpus <- tm_map(dataCorpus, stripWhitespace) ## Stripping unnecessary whitespace from document
+    
+## Convert Corpus to plain text document
+dataCorpus <- tm_map(dataCorpus, PlainTextDocument) 
+saveRDS(dataCorpus, file = "./dataCorpus.RData")
+```
+
+## 3. Creating Tokens and data sets
+
+
+```{r, cache = T}
+dataCorpus <- readRDS("./dataCorpus.RData")
+## data framing finalcorpus
+#dataCorpus <-data.frame(text=unlist(sapply(dataCorpus,`[`, "content")),stringsAsFactors = FALSE)
+```
+
+#### 3.1. Unigrams
+
+```{r, cache = T}
+unigram <- NGramTokenizer(dataCorpus, Weka_control(min = 1, max = 1,delimiters = " \\r\\n\\t.,;:\"()?!"))
+unigram <- data.frame(table(unigram))
+unigram <- unigram[order(unigram$Freq,decreasing = TRUE),]
+names(unigram) <- c("word1", "freq")
+head(unigram)
+unigram$word1 <- as.character(unigram$word1)
+write.csv(unigram[unigram$freq > 1,],"unigram.csv",row.names=F)
+unigram <- read.csv("unigram.csv",stringsAsFactors = F)
+saveRDS(unigram, file = "./ShinyApp/data/unigram.RData")
+```
+
+
+#### 3.2. Bi-grams
+
+```{r, cache = T}
+bigram <- NGramTokenizer(dataCorpus, Weka_control(min = 2, max = 2,delimiters = " \\r\\n\\t.,;:\"()?!"))
+bigram <- data.frame(table(bigram))
+bigram <- bigram[order(bigram$Freq,decreasing = TRUE),]
+names(bigram) <- c("words","freq")
+head(bigram)
+bigram$words <- as.character(bigram$words)
+str2 <- strsplit(bigram$words,split=" ")
+bigram <- transform(bigram, 
+                    one = sapply(str2,"[[",1),   
+                    two = sapply(str2,"[[",2))
+bigram <- data.frame(word1 = bigram$one,word2 = bigram$two,freq = bigram$freq,stringsAsFactors=FALSE)
+## saving files 
+write.csv(bigram[bigram$freq > 1,],"bigram.csv",row.names=F)
+bigram <- read.csv("bigram.csv",stringsAsFactors = F)
+saveRDS(bigram,"./ShinyApp/data/bigram.RData")
+```
+#### 3.3. Tri-grams
+
+```{r, cache = T}
+trigram <- NGramTokenizer(dataCorpus, Weka_control(min = 3, max = 3,delimiters = " \\r\\n\\t.,;:\"()?!"))
+trigram <- data.frame(table(trigram))
+trigram <- trigram[order(trigram$Freq,decreasing = TRUE),]
+names(trigram) <- c("words","freq")
+head(trigram)
+##################### 
+trigram$words <- as.character(trigram$words)
+str3 <- strsplit(trigram$words,split=" ")
+trigram <- transform(trigram,
+                     one = sapply(str3,"[[",1),
+                     two = sapply(str3,"[[",2),
+                     three = sapply(str3,"[[",3))
+# trigram$words <- NULL
+trigram <- data.frame(word1 = trigram$one,word2 = trigram$two, 
+                      word3 = trigram$three, freq = trigram$freq,stringsAsFactors=FALSE)
+# saving files
+write.csv(trigram[trigram$freq > 1,],"trigram.csv",row.names=F)
+trigram <- read.csv("trigram.csv",stringsAsFactors = F)
+saveRDS(trigram,"./ShinyApp/data/trigram.RData")
+```
+
+
+#### 3.4. Quad-grams
+
+```{r, cache = T}
+quadgram <- NGramTokenizer(dataCorpus, Weka_control(min = 4, max = 4,delimiters = " \\r\\n\\t.,;:\"()?!"))
+quadgram <- data.frame(table(quadgram))
+quadgram <- quadgram[order(quadgram$Freq,decreasing = TRUE),]
+names(quadgram) <- c("words","freq")
+head(quadgram)
+quadgram$words <- as.character(quadgram$words)
+str4 <- strsplit(quadgram$words,split=" ")
+quadgram <- transform(quadgram,
+                      one = sapply(str4,"[[",1),
+                      two = sapply(str4,"[[",2),
+                      three = sapply(str4,"[[",3), 
+                      four = sapply(str4,"[[",4))
+# quadgram$words <- NULL
+quadgram <- data.frame(word1 = quadgram$one,
+                       word2 = quadgram$two, 
+                       word3 = quadgram$three, 
+                       word4 = quadgram$four, 
+                       freq = quadgram$freq, stringsAsFactors=FALSE)
+# saving files
+write.csv(quadgram[quadgram$freq > 1,],"quadgram.csv",row.names=F)
+quadgram <- read.csv("quadgram.csv",stringsAsFactors = F)
+saveRDS(quadgram,"./ShinyApp/data/quadgram.RData")
+```
+
+
+## 4. Checking for performance
+
+```{r, cache = T}
+sessionInfo()
+```

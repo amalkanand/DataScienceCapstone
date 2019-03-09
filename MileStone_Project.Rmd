@@ -1,0 +1,197 @@
+---
+title: "Milestone Project"
+author: "Amal"
+date: "February 24, 2019"
+output: html_document
+---
+
+ 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = FALSE, message = FALSE)
+```
+
+## 1. Summary
+
+The milestone report as part of the Capstone project is used to demonstrate that I have gotten used to working with the data and that I am on track to create your prediction algorithm. It contains a summary of data preprocessing and exploratory data analysis of the data sets provided. The plans for creating the prediction algorithm and the Shiny app will also be discussed.
+
+## 2. Data Loading and Processing
+
+
+#### 2.1. Loading necessary R Libraries
+
+
+```{r}
+library(tm)
+library(stringi)
+library(stringr)
+library(dplyr)
+library(RWeka)
+library(ggplot2)
+```
+
+#### 2.2. Downloading and extracing Source Data
+```{r, cache = T}
+sourceDataUrl <-"http://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip"
+sourceFileName <- "Coursera-SwiftKey.zip"
+if (!file.exists(sourceFileName)) {
+  download.file(sourceDataUrl, destfile=sourceFileName)
+  #Unzip the file
+  unzip(sourceFileName)
+}
+
+```
+
+The source data sets consist of data in 4 different languages i.e German, English (US), Finnish and Russian. Each of the language data sets are further divided into 3 different type of data sets i.e.  News, Blogs and Twitter. As a part of this project, we will only look at the English (US) data set.
+
+ 
+
+```{r, cache = T}
+fileBlogs <- file("./Coursera-SwiftKey/final/en_US/en_US.blogs.txt", "rb")
+blogs <- readLines(fileBlogs, encoding="UTF-8", skipNul = TRUE)
+close(fileBlogs)
+
+fileNews <- file("./Coursera-SwiftKey/final/en_US/en_US.news.txt", "rb")
+news <- readLines(fileNews, encoding="UTF-8", skipNul = TRUE)
+close(fileNews)
+
+fileTwitter <- file("./Coursera-SwiftKey/final/en_US/en_US.twitter.txt", "rb")
+twitter <- readLines(fileTwitter, encoding="UTF-8", skipNul = TRUE)
+close(fileTwitter)
+```
+
+#### 2.3. Source Data Summary
+
+Check for the line count and word count in the data and check first few lines
+
+```{r, cache = T}
+# Get count of lines
+blogsLineCount <- length(blogs)
+newsLineCount <- length(news)
+twitterLineCount<- length(twitter)
+
+# Get count of words
+blogsWordCount <- stri_count_words(blogs)
+newsWordCount <- stri_count_words(news)
+twitterwordCount<- stri_count_words(twitter)
+
+dataSummary <- data.frame(filename = c("blogs","news","twitter"),
+                            numLines = c(blogsLineCount, newsLineCount, twitterLineCount),
+                            numWords = c(sum(blogsWordCount), sum(newsWordCount), sum(twitterwordCount)))
+
+dataSummary
+
+head(blogs)
+head(news)
+head(twitter)
+```
+
+We can see that the data contains lot of unwanted data characters. We need to clean and process the data before using further.
+
+#### 2.4. Data Cleaning and Processing
+
+Since the data set is large, We will randomly choose 1% of each data set to show data cleaning/processing and exploratory data analysis, and combine them into one data set for analysis.
+
+```{r, cache = T}
+set.seed(008)
+blogsSample <- sample(blogs, length(blogs)*0.01)
+newsSample <- sample(news, length(news)*0.01)
+twitterSample <- sample(twitter, length(twitter)*0.01)
+twitterSample <- sapply(twitterSample,
+                        function(row) iconv(row, "latin1", "ASCII", sub=""))
+
+dataSample  <- c(blogsSample,newsSample,twitterSample)
+
+```
+
+Creating few functions to be used for processing later. We are using n-gram for analysis. An n-gram refers to the number of words in a string. In this case, we check for unigram, bigram, trigram and quadgram. We are using the 'tm' and 'RWeka' library for performing calculations
+
+```{r, cache = T}
+# Function to clean the data
+toSpace <- content_transformer(function(x, pattern) gsub(pattern, " ", x))
+processCorpus <- function(corpus){
+    corpus <- tm_map(corpus, toSpace, "/|@|\\|")
+    corpus <- tm_map(corpus, content_transformer(tolower))
+    corpus <- tm_map(corpus, removeNumbers)
+    corpus <- tm_map(corpus, removePunctuation)
+    corpus <- tm_map(corpus, removeWords, stopwords("english"))
+    corpus <- tm_map(corpus, stripWhitespace)
+    return(corpus)
+}
+
+
+# Function to calculate histogram based on the data
+freqDataFrame <- function(tdm){
+    freq <- sort(rowSums(as.matrix(tdm)), decreasing=TRUE)
+    freqFrame <- data.frame(word=names(freq), freq=freq)
+    return(freqFrame)
+}
+
+ 
+bigramTokenizer <- function(x) NGramTokenizer(x, Weka_control(min=2, max=2))
+trigramTokenizer <- function(x) NGramTokenizer(x, Weka_control(min=3, max=3))
+quadgramTokenizer <- function(x) NGramTokenizer(x, Weka_control(min=4, max=4))
+```
+
+Sample Data Processing for various n-grams.  
+
+```{r, cache = T}
+
+dataSample <- VCorpus(VectorSource(dataSample))
+dataSample <- processCorpus(dataSample)
+
+unigramDataFrameTDM <- TermDocumentMatrix(dataSample)
+unigramDataFrameTDM <- removeSparseTerms(unigramDataFrameTDM, 0.99)
+unigramDataFrame <- freqDataFrame(unigramDataFrameTDM)
+
+bigramDataFrameTDM <- TermDocumentMatrix(dataSample, control=list(tokenize=bigramTokenizer))
+bigramDataFrameTDM <- removeSparseTerms(bigramDataFrameTDM, 0.999)
+bigramDataFrame <- freqDataFrame(bigramDataFrameTDM)
+
+trigramDataFrameTDM <- TermDocumentMatrix(dataSample, control=list(tokenize=trigramTokenizer))
+trigramDataFrameTDM <- removeSparseTerms(trigramDataFrameTDM, 0.9999)
+trigramDataFrame <- freqDataFrame(trigramDataFrameTDM)
+
+quadgramDataFrameTDM <- TermDocumentMatrix(dataSample, control=list(tokenize=quadgramTokenizer))
+quadgramDataFrameTDM <- removeSparseTerms(quadgramDataFrameTDM, 0.9999)
+quadgramDataFrame <- freqDataFrame(quadgramDataFrameTDM)
+```
+
+#### 2.5. Exploratory Data Analysis
+
+We check the distrbution of the various n-grams
+
+```{r, cache = T}
+ggplot(head(unigramDataFrame,20), aes(x=reorder(word,freq), y=freq)) +
+    geom_bar(stat="identity") +
+    coord_flip() +
+    theme(axis.title.y = element_blank()) +
+    labs(x="Uni-words", y="Frequency", title="Most frequently occuring unigrams in text sample")
+
+ggplot(head(bigramDataFrame,20), aes(x=reorder(word,freq), y=freq)) +
+    geom_bar(stat="identity") +
+    coord_flip() +
+    theme(axis.title.y = element_blank()) +
+    labs(x="Bi-words", y="Frequency", title="Most frequently occuring bigrams in text sample")
+
+ggplot(head(trigramDataFrame,20), aes(x=reorder(word,freq), y=freq)) +
+    geom_bar(stat="identity") +
+    coord_flip() +
+    theme(axis.title.y = element_blank()) +
+    labs(x="Tri-words", y="Frequency", title="Most frequently occuring trigrams in text sample")
+
+ggplot(head(quadgramDataFrame,20), aes(x=reorder(word,freq), y=freq)) +
+    geom_bar(stat="identity") +
+    coord_flip() +
+    theme(axis.title.y = element_blank()) +
+    labs(x="Quad-words", y="Frequency", title="Most frequently occuring quadgrams in text sample")
+
+```
+
+
+
+## 3. Plans for creating a prediction algorithm and Shiny app
+
+Based on the results exploratory data analysis, We can use the n-gram analysis for the prediction purposes of probability of occurence of the next word. A good method could be to start with higher n-gram method, and if nothing is found, move to a lower n-gram method and so on. We might also need to remove profanity words.
+
+The prediction model will need to be integrated into a Shiny application for the UI purposes.
